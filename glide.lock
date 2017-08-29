@@ -1,5 +1,5 @@
-hash: e872ffba1b42ff4d0b77dc5af5bbe6fadc77647e1edbfa9a7fde7699459cf139
-updated: 2017-07-21T13:58:14.204655699+10:00
+hash: 7f9e3ffd61890b8f6a892b1bdb530dbde1e7631dfd9501c36da5da1a1a3621b4
+updated: 2017-08-28T15:17:31.538869268-05:00
 imports:
 - name: bitbucket.org/ww/goautoneg
   version: 75cd24fc2f2c2a2088577d12123ddee5f54e0675
@@ -115,6 +115,8 @@ imports:
   version: ba18e35c5c1b36ef6334cad706eb681153d2d379
 - name: github.com/ghodss/yaml
   version: 73d445a93680fa1a78ae23a5839bad48f32ba1ee
+- name: github.com/go-ini/ini
+  version: 2e44421e256d82ebbf3d4d4fcabe8930b905eff3
 - name: github.com/go-openapi/analysis
   version: b44dc874b601d9e4e2f6e19140e794ba24bead3b
 - name: github.com/go-openapi/jsonpointer
@@ -133,7 +135,7 @@ imports:
   - proto
   - sortkeys
 - name: github.com/golang/glog
-  version: 44145f04b68cf362d9c4df2182967c2275eaefed
+  version: 23def4e6c14b4da8ac2ed8007337bc5eb5007998
 - name: github.com/golang/groupcache
   version: 02826c3e79038b59d737d3b1c0a1d937f71a4433
   subpackages:
@@ -160,7 +162,7 @@ imports:
 - name: github.com/gorilla/handlers
   version: a4d79d4487c2430a17d9dc8a1f74d1a6ed6908ca
 - name: github.com/gorilla/mux
-  version: bcd8bc72b08df0f70df986b97f95590779502d31
+  version: ac112f7d75a0714af1bd86ab17749b31f7809640
 - name: github.com/grpc-ecosystem/go-grpc-prometheus
   version: 2500245aa6110c562d17020fb31a2c133d737799
 - name: github.com/grpc-ecosystem/grpc-gateway
@@ -195,6 +197,17 @@ imports:
   version: fc2b8d3a73c4867e51861bbdd5ae3c1f0869dd6a
   subpackages:
   - pbutil
+- name: github.com/minio/go-homedir
+  version: 21304a94172ae3a09dee2cd86a12fb6f842138c7
+- name: github.com/minio/minio-go
+  version: 1a09415eed6025360c2c3142f92d3bcf339f873d
+  subpackages:
+  - pkg/credentials
+  - pkg/encrypt
+  - pkg/policy
+  - pkg/s3signer
+  - pkg/s3utils
+  - pkg/set
 - name: github.com/onsi/ginkgo
   version: 67b9df7f55fe1165fd9ad49aca7754cce01a42b8
   subpackages:
