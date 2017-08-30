@@ -17,7 +17,13 @@ limitations under the License.
 package s3broker
 
 import (
+	"fmt"
+	"sync"
 	"github.com/golang/glog"
+
+	clientset "k8s.io/client-go/kubernetes"
+	_ "k8s.io/client-go/pkg/api/v1"  //??
+	k8sRest "k8s.io/client-go/rest" 
 	"github.com/kubernetes-incubator/service-catalog/contrib/pkg/brokers/broker"
 	"github.com/kubernetes-incubator/service-catalog/pkg/brokerapi"
 	"github.com/minio/minio-go"
@@ -34,10 +40,30 @@ func CreateBroker() broker.Broker {
 	}
 }
 
-type s3ServiceInstance struct{}
+type s3ServiceInstance struct {
+	// unique instance id
+	Id string
+	// k8s namespace
+	Namespace string
+	// id of the service class??
+	ServiceID string
+	// binding credential created during Bind()
+	Credential *brokerapi.Credential // user, pwd, s3 url
+}
 
 type s3Broker struct {
+	// rwMutex controls concurrent R and RW access
+	rwMutex sync.RWMutex
+	// instanceMap maps instanceIDs to the ID's userProvidedServiceInstance values
 	instanceMap map[string]*s3ServiceInstance
+	// client used to access s3 API
+	s3Client *minio.Client
+	// client used to access kubernetes
+	kubeClient *clientset.Clientset
+	// s3 account, user and user-password strings
+	objAccount string
+	objUser string
+	objPass string
 }
 
 func (b *s3Broker) Catalog() (*brokerapi.Catalog, error) {
@@ -66,9 +92,38 @@ func (b *s3Broker) GetServiceInstanceLastOperation(instanceID, serviceID, planID
 	return nil, nil
 }
 func (b *s3Broker) CreateServiceInstance(instanceID string, req *brokerapi.CreateServiceInstanceRequest) (*brokerapi.CreateServiceInstanceResponse, error) {
-	glog.Info("CreateServiceInstance not yet implemented.")
+	b.rwMutex.Lock()
+	defer b.rwMutex.Unlock()
+	glog.Info("CreateServiceInstance", instanceID)
+
+	if _, ok := b.instanceMap[instanceID]; ok {
+		return nil, fmt.Errorf("ServiceInstance %q already exists", instanceID)
+	}
+	// create new service instance
+	newSvcInstance := &s3ServiceInstance{
+		Id: instanceID,
+		ServiceID: req.ServiceID,
+		Namespace: req.ContextProfile.Namespace,
+		Credential: nil, //TODO
+	}
+
+	// request parameters:
+	bucketName, ok := req.Parameters["bktNameParm"].(string)
+	if !ok {
+		bucketName = "DemoBkt1" // default
+	}
+	glog.Info("bucket", bucketName, "to be created...")
+
+	// provision requested bucket
+	err := doS3BucketProvision(bucketName, newSvcInstance.Namespace)
+	//TODO: reference above clients! For now just log them...
+	glog.Info("s3 client:", s3client, "k8s client:", k8sClient)
+
+	b.instanceMap[instanceID] = newSvcInstance
+	//TODO: return serviceInstanceResponse, nil
 	return nil, nil
 }
+
 func (b *s3Broker) RemoveServiceInstance(instanceID, serviceID, planID string, acceptsIncomplete bool) (*brokerapi.DeleteServiceInstanceResponse, error) {
 	glog.Info("RemoveServiceInstance not yet implemented.")
 	return nil, nil
@@ -82,3 +137,46 @@ func (b *s3Broker) UnBind(instanceID, bindingID, serviceID, planID string) error
 	glog.Info("UnBind not yet implemented.")
 	return nil
 }
+
+func doS3BucketProvision(bucket, ns string) error {
+	// get the s3 client
+	s3, err := getS3Client()
+	if err != nil {
+		return err
+	}
+	// get the kubernetes client
+	cs, err := getKubeClient()
+	if err != nil {
+		return err
+	}
+	glog.Info(s3, cs)  //TODO: just to make compiler happy... for now
+
+	return nil
+}
+
+// getS3Client returns a minio api client
+func getS3Client() (*minio.Client, error) {
+	glog.Info("Creating new S3 Client")
+	endpoint := "play.minio.io:9000" // fix this!!!
+	id := "Q3AM3UQ867SPQQA43P2F"     // fix
+	key := "zuf+tfteSlswRu7BJ86wekitnifILbZam1KYY3TG"
+	useSSL := true
+	minioClient, err := minio.NewV2(endpoint, id, key, useSSL)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create minio S3 client: %v", err)
+	}
+	return minioClient, nil
+}
+
+// getKubeClient returns a k8s api client
+func getKubeClient() (*clientset.Clientset, error) {
+	glog.Info("Getting k8s API Client config")
+	kubeClientConfig, err := k8sRest.InClusterConfig()
+	if err != nil {
+		return nil, fmt.Errorf("unable to create k8s in-cluster config: %v", err)
+	}
+	glog.Info("Creating new Kubernetes Clientset")
+	cs, err := clientset.NewForConfig(kubeClientConfig)
+	return cs, err
+}
+
