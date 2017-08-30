@@ -141,7 +141,6 @@ func (b *s3Broker) CreateServiceInstance(instanceID string, req *brokerapi.Creat
 	}
 	// create new service instance
 	newSvcInstance := &s3ServiceInstance{
-		Id: instanceID,
 		Namespace: req.ContextProfile.Namespace,
 		Credential: nil, //TODO
 	}
