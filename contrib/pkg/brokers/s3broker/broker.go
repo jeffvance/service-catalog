@@ -169,9 +169,20 @@ func (b *s3Broker) RemoveServiceInstance(instanceID, serviceID, planID string, a
 }
 
 func (b *s3Broker) Bind(instanceID, bindingID string, req *brokerapi.BindingRequest) (*brokerapi.CreateServiceBindingResponse, error) {
-	glog.Info("Bind not yet implemented.")
-	return nil, nil
+	instance, ok := b.instanceMap[instanceID]
+	if ! ok {
+		return nil, fmt.Errorf("Instance ID %q not found.", instanceID)
+	}
+	creds := *instance.Credential
+	if creds == nil {
+		return nil, fmt.Errorf("No credentials found for instance %q.", instanceID)
+	}
+	return &brokerapi.CreateServiceBindingResponse{
+		Credentials: creds,
+	}, nil
 }
+
+// nothing to do here
 func (b *s3Broker) UnBind(instanceID, bindingID, serviceID, planID string) error {
 	glog.Info("UnBind not yet implemented.")
 	return nil
