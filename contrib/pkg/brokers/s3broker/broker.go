@@ -19,6 +19,8 @@ package s3broker
 import (
 	"fmt"
 	"sync"
+	"net/http"
+	"io/ioutil"
 	"github.com/golang/glog"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,10 +34,13 @@ import (
 
 // CreateBroker initializes the service broker. This function is called by server.Start()
 func CreateBroker() broker.Broker {
-	//TODO: this external s3 endpoint should not be hard-coded
-	const S3_IP = "35.197.25.195" // needs to change for each new GCE cluster :(
 	const S3_BROKER_POD_LABEL = "glusterfs=s3-pod"
 	var instanceMap = make(map[string]*s3ServiceInstance)
+
+	S3_IP, err := getExternalIP()
+	if err != nil {
+		glog.Errorf("Failed to get external IP: %v", err)
+	}
 
 	// get the kubernetes client
 	cs, err := getKubeClient()
@@ -227,5 +232,29 @@ func getKubeClient() (*clientset.Clientset, error) {
 	glog.Info("Creating new Kubernetes Clientset")
 	cs, err := clientset.NewForConfig(kubeClientConfig)
 	return cs, err
+}
+
+func getExternalIP() (string, error) {
+	c := http.Client{}
+	glog.Info("Requesting external IP.")
+	req, err := http.NewRequest("GET", "http://metadata/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip", nil)
+	if err != nil {
+		glog.Errorf("Failed to create new http request: %v", err)
+		return "", err
+	}
+	req.Header.Add("Metadata-Flavor", " Google")
+	resp, err := c.Do(req)
+	if err != nil {
+		glog.Errorf("Failed to sent http request: %v", err)
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		glog.Errorf("Failed to decode http response body: %v", err)
+		return "", err
+	}
+	glog.Infof("Got external ip: %v", string(body))
+	return string(body), nil
 }
 
