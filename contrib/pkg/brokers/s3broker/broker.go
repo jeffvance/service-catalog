@@ -18,25 +18,49 @@ package s3broker
 
 import (
 	"fmt"
-	"sync"
-	"net/http"
 	"io/ioutil"
+	"net/http"
+	"sync"
+
 	"github.com/golang/glog"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clientset "k8s.io/client-go/kubernetes"
-	_ "k8s.io/client-go/pkg/api/v1"
-	k8sRest "k8s.io/client-go/rest" 
 	"github.com/kubernetes-incubator/service-catalog/contrib/pkg/brokers/broker"
 	"github.com/kubernetes-incubator/service-catalog/pkg/brokerapi"
 	"github.com/minio/minio-go"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clientset "k8s.io/client-go/kubernetes"
+	_ "k8s.io/client-go/pkg/api/v1"
+	k8sRest "k8s.io/client-go/rest"
 )
+
+
+type s3ServiceInstance struct {
+	// k8s namespace
+	Namespace string
+	// binding credential created during Bind()
+	Credential brokerapi.Credential // s3 server url, includes port and bucket name
+}
+
+type s3Broker struct {
+	// rwMutex controls concurrent R and RW access
+	rwMutex sync.RWMutex
+	// instanceMap maps instanceIDs to the ID's userProvidedServiceInstance values
+	instanceMap map[string]*s3ServiceInstance
+	// client used to access s3 API
+	s3Client *minio.Client
+	// s3 server ip and port
+	s3url string // includes ":port"
+	s3ID string
+	s3Pwd string
+	// client used to access kubernetes
+	kubeClient *clientset.Clientset
+}
 
 // CreateBroker initializes the service broker. This function is called by server.Start()
 func CreateBroker() broker.Broker {
 	const S3_BROKER_POD_LABEL = "glusterfs=s3-pod"
 	var instanceMap = make(map[string]*s3ServiceInstance)
-
+	glog.Info("Generating new broker.")
 	s3ip, err := getExternalIP()
 	if err != nil {
 		glog.Errorf("Failed to get external IP: %v", err)
@@ -80,41 +104,23 @@ func CreateBroker() broker.Broker {
 	if err != nil {
 		glog.Fatalf("failed to get s3 service %q: %v\n", svcName, err)
 	}
-	s3Port := svc.Spec.Ports[0].NodePort // int, TODO: always [0]?
+	s3Port := svc.Spec.Ports[0].NodePort // int
 
 	// get the s3 client
-	s3c, err := getS3Client(acct, user, pass, s3ip)
+	s3endpoint := fmt.Sprintf("%s:%d", s3ip, s3Port)
+	s3c, err := getS3Client(acct, user, pass, s3endpoint)
 	if err != nil {
 		glog.Fatalf("failed to get minio-s3 client: %v\n", err)
 	}
-
-	glog.Infof("**** CreateBroker: s3Port=%v, s3url=%q\n", s3Port, fmt.Sprintf("%v:%v", s3ip, s3Port))
+	glog.Infof("New Broker for s3 endpoint: %s", s3endpoint)
 	return &s3Broker{
 		instanceMap: instanceMap,
-		s3Client: s3c,
-		s3url: fmt.Sprintf("%v:%v", s3ip, s3Port),
-		kubeClient: cs,
+		s3Client:    s3c,
+		s3url:       s3endpoint,
+		kubeClient:  cs,
+		s3ID: fmt.Sprintf("%s:%s", acct, user),
+		s3Pwd: pass,
 	}
-}
-
-type s3ServiceInstance struct {
-	// k8s namespace
-	Namespace string
-	// binding credential created during Bind()
-	Credential brokerapi.Credential // s3 server url, includes port and bucket name
-}
-
-type s3Broker struct {
-	// rwMutex controls concurrent R and RW access
-	rwMutex sync.RWMutex
-	// instanceMap maps instanceIDs to the ID's userProvidedServiceInstance values
-	instanceMap map[string]*s3ServiceInstance
-	// client used to access s3 API
-	s3Client *minio.Client
-	// s3 server ip and port
-	s3url string // includes ":port"
-	// client used to access kubernetes
-	kubeClient *clientset.Clientset
 }
 
 func (b *s3Broker) Catalog() (*brokerapi.Catalog, error) {
@@ -122,7 +128,7 @@ func (b *s3Broker) Catalog() (*brokerapi.Catalog, error) {
 		Services: []*brokerapi.Service{
 			{
 				Name:        "gluster-object-store",
-				ID:          "lkdgkf2napdwedom",
+				ID:          "0",
 				Description: "An object bucket backed by GlusterFS Object Storage.",
 				Bindable:    true,
 				Plans: []brokerapi.ServicePlan{
@@ -144,44 +150,43 @@ func (b *s3Broker) GetServiceInstanceLastOperation(instanceID, serviceID, planID
 }
 
 func (b *s3Broker) CreateServiceInstance(instanceID string, req *brokerapi.CreateServiceInstanceRequest) (*brokerapi.CreateServiceInstanceResponse, error) {
-	const BUCKET_URL = "bucketurl"
-
+	glog.Info("CreateServiceInstance called.  instanceID: %s", instanceID)
 	b.rwMutex.Lock()
 	defer b.rwMutex.Unlock()
-
+	const (
+		BUCKET_ENDPOINT = "bucketEndpoint"
+		BUCKET_NAME     = "bucketName"
+		BUCKET_ID       = "bucketID"
+		BUCKET_PWORD    = "bucketPword"
+	)
 	// does service instance exist?
 	if _, ok := b.instanceMap[instanceID]; ok {
 		return nil, fmt.Errorf("ServiceInstance %q already exists", instanceID)
 	}
+	// Check required parameter "bucketName"
+	bucketName, ok := req.Parameters["bucketName"].(string)
+	if ! ok {
+		return nil, fmt.Errorf("Paramters[\"bucketName\"] not provided.  Please define a bucket name.")
+	}
+	glog.Info("Creating new bucket: %q for instance %q.", bucketName, instanceID)
 	// create new service instance
-	ns := req.ContextProfile.Namespace
-	newSvcInstance := &s3ServiceInstance{
-		Namespace: ns,
-		Credential: nil, //TODO
-	}
-	glog.Infof("creating ServiceInstance %q", instanceID)
-
-	// request parameters:
-	bucketName, ok := req.Parameters["bktNameParm"].(string)
-	if !ok {
-		bucketName = "DemoBkt1" // default
-	}
-	glog.Infof("creating bucket %q...", bucketName)
-
-	// provision requested bucket
 	err := b.provisionBucket(bucketName)
 	if err != nil {
-		return nil, fmt.Errorf("cannot provision bucket %q: %v", bucketName, err)
+		return nil, fmt.Errorf("Failed to provision bucket <%s>: %v", bucketName, err)
 	}
-	glog.Info("*** no err creating bucket %q", bucketName)
-
-	newSvcInstance.Credential[BUCKET_URL] = fmt.Sprintf("%s/%s", b.s3url, bucketName)
-	glog.Info("**** new instance: %+v", newSvcInstance)
-	b.instanceMap[instanceID] = newSvcInstance
-	glog.Info("**** full instanceMap: %+v", b.instanceMap)
+	b.instanceMap[instanceID] = &s3ServiceInstance{
+		Namespace: req.ContextProfile.Namespace,
+		Credential: brokerapi.Credential{
+			BUCKET_NAME:     bucketName,
+			BUCKET_ENDPOINT: b.s3url,
+			BUCKET_ID:       b.s3ID,
+			BUCKET_PWORD:    b.s3Pwd,
+		},
+	}
 	return nil, nil
 }
 
+// TODO
 func (b *s3Broker) RemoveServiceInstance(instanceID, serviceID, planID string, acceptsIncomplete bool) (*brokerapi.DeleteServiceInstanceResponse, error) {
 	glog.Info("RemoveServiceInstance not yet implemented.")
 	return nil, nil
@@ -208,21 +213,20 @@ func (b *s3Broker) UnBind(instanceID, bindingID, serviceID, planID string) error
 }
 
 func (b *s3Broker) provisionBucket(bucket string) error {
+	glog.Infof("provisionBucket(name: %q).", bucket)
 	location := "" // ignored for now...
-
 	// check if bucket already exists
 	exists, err := b.s3Client.BucketExists(bucket)
 	if err == nil && exists {
-		return fmt.Errorf("bucket %q already exists", bucket)
+		return fmt.Errorf("Bucket %q already exists.  S3-Client: %v", bucket, err)
 	}
-	glog.Info("**** provisionBucket: bucket %q needs to be created", bucket)
-
 	// create new bucket
+	glog.Infof("Creating bucket %q.", bucket)
 	err = b.s3Client.MakeBucket(bucket, location)
 	if err != nil {
-		return fmt.Errorf("MakeBucket err: %v", err)
+		return fmt.Errorf("S3-Client.MakeBucket err: %v", err)
 	}
-	glog.Info("**** provisionBucket: bucket %q be was created", bucket)
+	glog.Infof("Bucket %q created.", bucket)
 	return nil
 }
 
@@ -234,7 +238,7 @@ func getS3Client(acct, user, pass, ip string) (*minio.Client, error) {
 	useSSL := false
 	minioClient, err := minio.NewV2(ip, id, pass, useSSL)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create minio S3 client: %v", err)
+		return nil, fmt.Errorf("Unable to create minio S3 client: %v", err)
 	}
 	return minioClient, nil
 }
@@ -274,4 +278,3 @@ func getExternalIP() (string, error) {
 	glog.Infof("Got external ip: %v", string(body))
 	return string(body), nil
 }
-

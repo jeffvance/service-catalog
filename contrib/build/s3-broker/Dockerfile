@@ -16,4 +16,4 @@ FROM BASEIMAGE
 
 ADD s3-broker /opt/services/s3-broker
 
-ENTRYPOINT ["/opt/services/s3-broker"]
+ENTRYPOINT ["/opt/services/s3-broker", "-alsologtostderr=true"]

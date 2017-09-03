@@ -1,5 +1,5 @@
 hash: 7f9e3ffd61890b8f6a892b1bdb530dbde1e7631dfd9501c36da5da1a1a3621b4
-updated: 2017-08-28T15:17:31.538869268-05:00
+updated: 2017-09-03T14:32:18.92172763-05:00
 imports:
 - name: bitbucket.org/ww/goautoneg
   version: 75cd24fc2f2c2a2088577d12123ddee5f54e0675
@@ -200,7 +200,7 @@ imports:
 - name: github.com/minio/go-homedir
   version: 21304a94172ae3a09dee2cd86a12fb6f842138c7
 - name: github.com/minio/minio-go
-  version: 1a09415eed6025360c2c3142f92d3bcf339f873d
+  version: 84539d76271caeffb7a1d5f058bd83c6449f8145
   subpackages:
   - pkg/credentials
   - pkg/encrypt

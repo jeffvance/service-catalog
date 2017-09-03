@@ -6,3 +6,5 @@ metadata:
 spec:
   serviceClassName: gluster-object-store 
   planName: default
+  parameters:
+    bucketName: "bucket-demo-123" # Required

@@ -42,6 +42,7 @@ func init() {
 }
 
 func main() {
+	defer glog.Flush()
 	if err := run(); err != nil && err != context.Canceled && err != context.DeadlineExceeded {
 		glog.Fatalln(err)
 	}
